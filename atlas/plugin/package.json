@@ -1,0 +1,32 @@
+{
+  "name": "@artisanai/paperclip-plugin-atlas",
+  "version": "0.1.0",
+  "description": "Atlas: a living mindmap/orgchart command surface, mounted as a Paperclip page",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/manifest.ts"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "scripts": {
+    "prebuild": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps",
+    "build": "tsc && mkdir -p dist/ui && cp ../src/atlas.js ../src/paperclip-adapter.js ../src/demo.js dist/ui/",
+    "clean": "rm -rf dist",
+    "typecheck": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps && tsc --noEmit"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "react": "^19.2.7",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
