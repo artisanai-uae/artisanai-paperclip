@@ -1,0 +1,22 @@
+diff --git a/ui/src/App.tsx b/ui/src/App.tsx
+index f11df9b..fe1d0b8 100644
+--- a/ui/src/App.tsx
++++ b/ui/src/App.tsx
+@@ -58,6 +58,7 @@ import { PluginSettings } from "./pages/PluginSettings";
+ import { AdapterManager } from "./pages/AdapterManager";
+ import { PluginPage } from "./pages/PluginPage";
+ import { OrgChart } from "./pages/OrgChart";
++import { OrgAtlas } from "./pages/OrgAtlas";
+ import { NewAgent } from "./pages/NewAgent";
+ import { AuthPage } from "./pages/Auth";
+ import { BoardClaimPage } from "./pages/BoardClaim";
+@@ -107,7 +108,8 @@ function boardRoutes() {
+       <Route path="settings" element={<LegacySettingsRedirect />} />
+       <Route path="settings/*" element={<LegacySettingsRedirect />} />
+       <Route path="plugins/:pluginId" element={<PluginPage />} />
+-      <Route path="org" element={<OrgChart />} />
++      <Route path="org" element={<OrgAtlas />} />
++      <Route path="org/classic" element={<OrgChart />} />
+       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
+       <Route path="agents/all" element={<Agents />} />
+       <Route path="agents/active" element={<Agents />} />

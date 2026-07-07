@@ -6,6 +6,13 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8931", "--directory", "atlas"],
       "port": 8931
+    },
+    {
+      "name": "paperclip-app",
+      "cwd": "repo",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; PORT=3210 corepack pnpm dev:once"],
+      "port": 3210
     }
   ]
 }

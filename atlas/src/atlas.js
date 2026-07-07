@@ -647,6 +647,8 @@ const company = {
   mrr: model.company?.mrr ?? 0,
   mrrTarget: model.company?.mrrTarget || 1_000_000,
   revenueRate: model.company?.revenueRate || 0,
+  metricLabel: model.company?.metricLabel || 'MRR',
+  metricScale: model.company?.metricScale ?? 20,
 };
 
 let UID = 0;
@@ -902,8 +904,8 @@ function render() {
         : a.status==='paused' ? '❚❚ paused' : (cur ? cur.title : 'idle, awaiting delegation');
       info.querySelector('.spend').textContent = `${fmt$(a.spent)} / ${fmt$(a.budget)} · ♥ ${a.beatEvery}s`;
     } else {
-      el.style.setProperty('--pca-pct', Math.min(1, company.mrr / company.mrrTarget * 20)); /* arc shows progress to first 5% */
-      const m = el.querySelector('#rootMrr'); if (m) m.textContent = fmt$(company.mrr) + ' MRR';
+      el.style.setProperty('--pca-pct', Math.min(1, company.mrr / company.mrrTarget * company.metricScale));
+      const m = el.querySelector('#rootMrr'); if (m) m.textContent = fmt$(company.mrr) + ' ' + company.metricLabel;
     }
     if (a.parent) { const eg = edgeEls.get(a.id); eg.setAttribute('d', edgePath(a.parent, a)); eg.classList.toggle('hidden', !visible(a)); }
   }
@@ -1392,6 +1394,7 @@ function toast(html) {
    BOOT
    ================================================================ */
 $('#coName').textContent = company.name;
+const kMrrLabel = $('#kMrr').previousElementSibling; if (kMrrLabel) kMrrLabel.textContent = company.metricLabel;
 if (!SIM) $('#simBtn').hidden = true;
 $('#layoutBtn').textContent = layoutMode === 'tree' ? '⌾ Constellation' : '⋔ Hierarchy';
 layout();
