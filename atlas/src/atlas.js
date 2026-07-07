@@ -277,6 +277,39 @@ const ATLAS_CSS = String.raw`
 .pc-atlas #legend .sw { width: 8px; height: 8px; border-radius: 50%; }
 @container (max-width: 900px) { #legend { display: none; } }
 
+/* ---------- drill-down focus pill ---------- */
+.pc-atlas #focusPill {
+  position: absolute; top: 14px; left: 50%; translate: -50% 0; z-index: var(--z-hud);
+  display: none; align-items: center; gap: 9px; padding: 6px 9px 6px 13px;
+  border-radius: 99px; font-size: 12px; color: var(--ink-2);
+  background: color-mix(in oklch, var(--cyan) 13%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--cyan) 45%, var(--line));
+}
+.pc-atlas #focusPill.show { display: flex; }
+.pc-atlas #focusPill b { color: var(--ink); }
+.pc-atlas #focusPill button {
+  all: unset; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer; color: var(--ink-2); font-size: 11px;
+}
+.pc-atlas #focusPill button:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ---------- right-click context menu ---------- */
+.pc-atlas #ctxmenu {
+  position: absolute; z-index: var(--z-pop); min-width: 210px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 5px; display: none; flex-direction: column;
+  box-shadow: 0 14px 34px oklch(0 0 0 / .55);
+}
+.pc-atlas #ctxmenu.show { display: flex; }
+.pc-atlas #ctxmenu button {
+  all: unset; display: flex; gap: 9px; align-items: center;
+  padding: 7px 10px; border-radius: 7px; font-size: 12.5px; cursor: pointer; color: var(--ink);
+}
+.pc-atlas #ctxmenu button:hover { background: color-mix(in oklch, var(--cobalt) 26%, var(--surface)); }
+.pc-atlas #ctxmenu button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.pc-atlas #ctxmenu .mi { width: 16px; text-align: center; color: var(--cyan); flex: none; }
+.pc-atlas #ctxmenu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
 /* ================= HUD ================= */
 .pc-atlas #hud {
   position: absolute; top: 14px; left: 16px; z-index: var(--z-hud);
@@ -508,6 +541,7 @@ const SCAFFOLD = String.raw`
 <div id="topright">
   <button class="btn" id="layoutBtn" title="Switch between hierarchy and constellation layout"></button>
   <button class="btn" id="fitBtn" title="Fit map (0)">⌖ Fit</button>
+  <button class="btn" id="popBtn" title="Break Atlas out into its own floating window">⧉ Pop out</button>
   <button class="btn" id="simBtn" title="Pause simulation">❚❚ Sim</button>
   <button class="btn" popovertarget="about" title="How this interface thinks">?</button>
 </div>
@@ -568,7 +602,7 @@ const SCAFFOLD = String.raw`
     <dt>#32 Color change</dt><dd><b>State is temperature:</b> cyan = alive, green = funded, amber = near limit, red = stopped.</dd>
     <dt>#17 Another dimension</dt><dd><b>Two projections, one org:</b> Hierarchy view ranks agents in labeled tiers (Mission, CEO, Leadership, Team); Constellation view shows the same company as a radial map. Toggle anytime.</dd>
   </dl>
-  <p style="margin-top:14px;font-size:11px;color:var(--ink-3)">Scroll to zoom · drag the canvas to pan · click an agent for its dossier · <b>drag an agent onto a new manager to re-org</b> · double-click (or its ▾ badge) to fold a branch · <kbd style="font:10px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px">/</kbd> to search · click a task to light its why-chain to the mission.</p>
+  <p style="margin-top:14px;font-size:11px;color:var(--ink-3)">Scroll to zoom · drag the canvas to pan · click an agent for its dossier · <b>drag an agent onto a new manager to re-org</b> · <b>right-click an agent to drill down</b> (it becomes the central node) · ⧉ pops the map into its own floating window · double-click (or its ▾ badge) to fold a branch · <kbd style="font:10px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px">/</kbd> to search · click a task to light its why-chain to the mission.</p>
 </div>
 
 <dialog id="hireDlg">
@@ -591,6 +625,9 @@ const SCAFFOLD = String.raw`
 </dialog>
 
 <div id="toast" role="status"></div>
+
+<div id="focusPill" role="status"><span>◉ Drilled into <b id="focusName"></b></span><button id="focusExit" title="Back to full org" aria-label="Back to full org">✕</button></div>
+<div id="ctxmenu" role="menu"></div>
 
 <div id="legend" aria-hidden="true">
   <i><span class="sw" style="background:var(--cyan)"></span>alive</i>
@@ -615,8 +652,20 @@ export function mountAtlas(rootEl, opts = {}) {
   const LY = e => { if (!_rect) refreshRect(); return e.clientY - _rect.top; };
   const storGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
   const storSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
-  const _cleanups = [];
-  const docOn = (target, ev, fn, o) => { target.addEventListener(ev, fn, o); _cleanups.push(() => target.removeEventListener(ev, fn, o)); };
+  const _globalListeners = [];
+  const docOn = (target, ev, fn, o) => {
+    const kind = target === window ? 'window' : target === document ? 'document' : null;
+    target.addEventListener(ev, fn, o);
+    _globalListeners.push({ kind, target, ev, fn, o });
+  };
+  function retargetGlobalListeners(win) {
+    for (const en of _globalListeners) {
+      if (!en.kind) continue;
+      en.target.removeEventListener(en.ev, en.fn, en.o);
+      en.target = en.kind === 'window' ? win : win.document;
+      en.target.addEventListener(en.ev, en.fn, en.o);
+    }
+  }
   const emit = action => { try { opts.onAction?.(action); } catch (err) { console.error('[atlas] onAction handler failed', err); } };
 
 
@@ -702,7 +751,16 @@ const agents = () => { const out=[]; (function walk(n){ out.push(n); n.children.
    ================================================================ */
 const RING = 240;
 const visKids = n => n.collapsed ? [] : n.children;
-function visible(a) { for (let p = a.parent; p; p = p.parent) if (p.collapsed) return false; return true; }
+let focus = null;                       /* drill-down: subtree root, null = whole org */
+const layoutRoot = () => focus || root;
+function inFocus(a) { if (!focus) return true; for (let p = a; p; p = p.parent) if (p === focus) return true; return false; }
+function visible(a) {
+  if (!inFocus(a)) return false;
+  const stop = layoutRoot();
+  if (a === stop) return true;
+  for (let p = a.parent; p; p = p.parent) { if (p.collapsed) return false; if (p === stop) break; }
+  return true;
+}
 function descCount(n) { return n.children.reduce((s, c) => s + 1 + descCount(c), 0); }
 function leaves(n) { const k = visKids(n); return k.length ? k.reduce((s,c)=>s+leaves(c),0) : 1; }
 let layoutMode = storGet('pc-atlas-layout') || opts.layout || 'tree';
@@ -711,9 +769,11 @@ const SLOT = 185, VGAP = 255;   /* tree mode: leaf slot width, tier height */
 function layout() {
   if (layoutMode === 'tree') layoutTree(); else layoutRadial();
   /* folded subtrees tuck into their manager (they tween in and fade) */
-  for (const a of agents()) if (a !== root && !visible(a)) {
-    let p = a.parent; while (!visible(p)) p = p.parent;
-    a.tx = p.tx; a.ty = p.ty;
+  const R = layoutRoot();
+  for (const a of agents()) if (a !== R && !visible(a)) {
+    let p = a.parent;
+    while (p && !visible(p)) p = p.parent;
+    a.tx = p ? p.tx : R.tx; a.ty = p ? p.ty : R.ty;
   }
   drawTiers();
 }
@@ -721,6 +781,7 @@ function layout() {
 /* org-chart principle: rank = vertical tier; siblings share a row.
    x from leaf slots (tidy tree), internal nodes centered over their team */
 function layoutTree() {
+  const R = layoutRoot();
   let cursor = 0;
   (function place(n, depth) {
     n.ty = depth * VGAP;
@@ -728,13 +789,14 @@ function layoutTree() {
     if (!kids.length) { n.tx = cursor * SLOT; cursor += 1; return; }
     for (const c of kids) place(c, depth + 1);
     n.tx = (kids[0].tx + kids[kids.length - 1].tx) / 2;
-  })(root, 0);
-  const shift = root.tx;                       /* mission anchored at x = 0 */
+  })(R, 0);
+  const shift = R.tx;                          /* layout root anchored at x = 0 */
   for (const a of agents()) if (visible(a)) a.tx -= shift;
 }
 
 function layoutRadial() {
-  root.tx = 0; root.ty = 0;
+  const R = layoutRoot();
+  R.tx = 0; R.ty = 0;
   let a0 = -Math.PI / 2;
   (function place(n, from, to, depth) {
     const span = to - from, L = leaves(n);
@@ -747,7 +809,7 @@ function layoutRadial() {
       place(c, cursor, cursor + share, depth + 1);
       cursor += share;
     }
-  })(root, a0, a0 + Math.PI * 2, 1);
+  })(R, a0, a0 + Math.PI * 2, 1);
 }
 
 /* tier bands: each level of the hierarchy names itself */
@@ -758,10 +820,11 @@ function drawTiers() {
   tiersG.innerHTML = '';
   wires.prepend(tiersG);
   if (layoutMode !== 'tree') return;
+  const R = layoutRoot();
   const vis = agents().filter(visible);
   const depths = new Map();
   for (const a of vis) {
-    let d = 0; for (let p = a.parent; p; p = p.parent) d++;
+    let d = 0; for (let p = a; p && p !== R; p = p.parent) d++;
     depths.set(d, true);
   }
   const xs = vis.map(a => a.tx);
@@ -780,7 +843,7 @@ function drawTiers() {
     tx.setAttribute('x', x0); tx.setAttribute('y', y - 9);
     tx.setAttribute('fill', 'oklch(0.62 0.035 258)');
     tx.setAttribute('style', 'font: 600 12px ui-monospace, Menlo, monospace; letter-spacing: .06em;');
-    tx.textContent = (TIER_NAMES[d] || 'Level ' + d).toUpperCase();
+    tx.textContent = (focus ? (d === 1 ? 'Direct reports' : 'Level ' + d) : (TIER_NAMES[d] || 'Level ' + d)).toUpperCase();
     tiersG.appendChild(tx);
   }
 }
@@ -849,6 +912,7 @@ function buildNode(a) {
   el.querySelector('.badge').addEventListener('click', e => { e.stopPropagation(); toggleFold(a); });
   el.addEventListener('dblclick', e => { e.preventDefault(); toggleFold(a); });
   el.addEventListener('pointerdown', e => nodeDown(a, el, e));
+  el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); refreshRect(); nodeMenu(a, e); });
   el.addEventListener('pointerenter', () => hoverBranch(a, true));
   el.addEventListener('pointerleave', () => hoverBranch(a, false));
   el.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); select(a); } });
@@ -875,7 +939,7 @@ function edgePath(p, c) {
   if (layoutMode === 'tree') {
     /* leave below the parent's label block, arrive above the child: the
        reporting line never runs through a name */
-    const y0 = p.y + (p === root ? 104 : 76), y1 = c.y - 46;
+    const y0 = p.y + (p === root && !focus ? 104 : 76), y1 = c.y - 46;
     const my = (y0 + y1) / 2;
     return `M ${p.x} ${y0} C ${p.x} ${my}, ${c.x} ${my}, ${c.x} ${y1} L ${c.x} ${c.y - 38}`;
   }
@@ -900,7 +964,7 @@ function render() {
       const info = el.querySelector('.near-info');
       info.querySelector('.boss').textContent = '↑ reports to ' + (a.parent === root ? 'the board' : a.parent.name);
       const cur = a.tasks.find(t => t.status === 'active');
-      info.querySelector('.task').textContent = a.status==='stopped' ? '■ stopped: budget exhausted'
+      info.querySelector('.task').textContent = a.status==='stopped' ? (a.spent >= a.budget ? '■ stopped: budget exhausted' : '■ stopped: needs attention')
         : a.status==='paused' ? '❚❚ paused' : (cur ? cur.title : 'idle, awaiting delegation');
       info.querySelector('.spend').textContent = `${fmt$(a.spent)} / ${fmt$(a.budget)} · ♥ ${a.beatEvery}s`;
     } else {
@@ -942,6 +1006,12 @@ stage.addEventListener('pointermove', e => {
 });
 stage.addEventListener('pointerup', () => { pan = null; stage.classList.remove('panning'); });
 stage.addEventListener('click', e => { if (!e.target.closest('.node')) deselect(); });
+stage.addEventListener('contextmenu', e => {
+  if (e.target.closest('.node')) return;
+  e.preventDefault(); refreshRect();
+  if (focus) openMenu(LX(e), LY(e), [{ icon: '⌂', label: 'Back to full org', fn: () => drill(null) }]);
+  else closeMenu();
+});
 
 function fit(animated = true) {
   const all = agents();
@@ -978,7 +1048,7 @@ const particles = [];
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 function spawnParticle(agentId, dir, color) {
   if (reduceMotion.matches) return;
-  const path = edgeEls.get(agentId); if (!path) return;
+  const path = edgeEls.get(agentId); if (!path || path.classList.contains('hidden')) return;
   const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
   c.setAttribute('r', dir === 1 ? 3 : 3.5); c.setAttribute('class','particle');
   c.setAttribute('fill', color);
@@ -1184,6 +1254,85 @@ function feed(ic, html, a) {
 }
 
 /* ================================================================
+   DRILL-DOWN — right-click any agent to make it the central node
+   ================================================================ */
+function drill(a, o = {}) {
+  const next = (a && a !== root) ? a : null;
+  if (next === focus) return;
+  focus = next;
+  if (focus) focus.collapsed = false;
+  clearChain();
+  if (selected && !visible(selected)) deselect();
+  $('#focusName').textContent = focus ? `${focus.name}'s team` : '';
+  $('#focusPill').classList.toggle('show', !!focus);
+  if (!o.silent) feed('◉', focus ? `Drilled into <b>${focus.name}</b>'s team` : 'Back to the full org');
+  layout(); startTween();
+  setTimeout(() => fit(), 90);
+}
+$('#focusExit').onclick = () => drill(null);
+
+const menu = $('#ctxmenu');
+function closeMenu() { menu.classList.remove('show'); }
+function openMenu(x, y, items) {
+  menu.innerHTML = '';
+  for (const it of items) {
+    if (it === '-') { const d = rootEl.ownerDocument.createElement('div'); d.className = 'sep'; menu.appendChild(d); continue; }
+    const b = rootEl.ownerDocument.createElement('button');
+    b.innerHTML = `<span class="mi">${it.icon}</span><span>${it.label}</span>`;
+    b.onclick = () => { closeMenu(); it.fn(); };
+    menu.appendChild(b);
+  }
+  menu.classList.add('show');
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.min(x, VW() - mw - 10) + 'px';
+  menu.style.top = Math.min(y, VH() - mh - 10) + 'px';
+}
+function nodeMenu(a, e) {
+  const items = [];
+  if (a !== root) items.push({ icon: '◉', label: `Drill down — center on ${a.name}`, fn: () => drill(a) });
+  if (a.children.length) items.push({ icon: a.collapsed ? '▸' : '▾', label: a.collapsed ? `Unfold ${a === root ? 'org' : 'team'} (${descCount(a)})` : `Fold ${a === root ? 'org' : 'team'}`, fn: () => toggleFold(a) });
+  if (a !== root) items.push({ icon: '⤢', label: 'Open dossier', fn: () => { select(a); flyTo(a); } });
+  if (focus) items.push('-', { icon: '⌂', label: 'Back to full org', fn: () => drill(null) });
+  openMenu(LX(e), LY(e), items);
+}
+docOn(document, 'pointerdown', e => { if (!e.target.closest('#ctxmenu')) closeMenu(); }, true);
+
+/* ================================================================
+   POP OUT — lift the live map into its own floating window
+   (Document Picture-in-Picture; falls back to a plain popup)
+   ================================================================ */
+let pipWin = null, pipSlot = null;
+async function popout() {
+  if (pipWin) { try { pipWin.close(); } catch {} return; }
+  const dpp = window.documentPictureInPicture;
+  if (dpp?.requestWindow) {
+    try {
+      const pip = await dpp.requestWindow({ width: 1120, height: 760 });
+      pipWin = pip;
+      pipSlot = document.createComment('pc-atlas-slot');
+      rootEl.parentNode.insertBefore(pipSlot, rootEl);
+      const st = pip.document.createElement('style');
+      st.textContent = ATLAS_CSS + ' html,body{margin:0;height:100%;overflow:hidden;background:oklch(0.115 0.026 262);}';
+      pip.document.head.appendChild(st);
+      pip.document.title = 'Paperclip Atlas';
+      pip.document.body.appendChild(rootEl);
+      retargetGlobalListeners(pip);
+      pip.addEventListener('pagehide', () => {
+        try { pipSlot.parentNode.insertBefore(rootEl, pipSlot); pipSlot.remove(); } catch {}
+        retargetGlobalListeners(window);
+        pipWin = null; pipSlot = null;
+        refreshRect(); applyCam(); setTimeout(() => fit(), 80);
+      });
+      refreshRect(); applyCam(); setTimeout(() => fit(), 80);
+      toast('Atlas is floating in its own window — close it to return here.');
+      return;
+    } catch (err) { console.warn('[atlas] picture-in-picture unavailable, opening a popup:', err); }
+  }
+  window.open(opts.popoutUrl || location.href, 'pc-atlas-window', 'popup=yes,width=1280,height=840');
+}
+$('#popBtn').onclick = () => { closeMenu(); popout(); };
+
+/* ================================================================
    SELECTION + DOSSIER PANEL
    ================================================================ */
 let selected = null, litTask = null;
@@ -1339,6 +1488,7 @@ cmdInput.addEventListener('input', () => {
 });
 function jump(a) {
   cmdInput.value = ''; results.classList.remove('show'); cmdInput.blur();
+  if (focus && !inFocus(a)) drill(null, { silent: true });
   unfoldTo(a); select(a); flyTo(a);
 }
 cmdInput.addEventListener('keydown', e => {
@@ -1353,9 +1503,10 @@ cmdInput.addEventListener('keydown', e => {
 docOn(document, 'keydown', e => {
   if (!rootEl.isConnected) return;
   if (e.target.matches('input, select, textarea')) return;
-  if (!rootEl.contains(document.activeElement) && document.activeElement !== document.body) return;
+  const _d = rootEl.ownerDocument;
+  if (!rootEl.contains(_d.activeElement) && _d.activeElement !== _d.body) return;
   if (e.key === '/') { e.preventDefault(); cmdInput.focus(); }
-  if (e.key === 'Escape') deselect();
+  if (e.key === 'Escape') { closeMenu(); deselect(); }
   if (e.key === '0') fit();
   if (e.key === '+' || e.key === '=') zoomBy(1.25);
   if (e.key === '-') zoomBy(0.8);
@@ -1457,7 +1608,8 @@ function applyEvent(evt) {
 function destroy() {
   alive = false;
   simOn = false;
-  for (const fn of _cleanups) fn();
+  try { pipWin?.close(); } catch {}
+  for (const en of _globalListeners) en.target.removeEventListener(en.ev, en.fn, en.o);
   try { ro.disconnect(); } catch {}
   particles.length = 0;
   rootEl.innerHTML = '';
@@ -1467,6 +1619,8 @@ function destroy() {
 return {
   applyEvent,
   destroy,
+  drill: id => drill(id ? agents().find(x => x.id === id) : null),
+  popout,
   fit: () => fit(),
   select: id => { const a = agents().find(x => x.id === id); if (a && a !== root) { unfoldTo(a); select(a); flyTo(a); } },
   setLayout: m => setLayoutMode(m === 'radial' ? 'radial' : 'tree'),

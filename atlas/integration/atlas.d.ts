@@ -57,6 +57,8 @@ export type AtlasEvent =
 export interface AtlasInstance {
   applyEvent(evt: AtlasEvent): void;
   destroy(): void;
+  drill(agentId: string | null): void;
+  popout(): Promise<void>;
   fit(): void;
   select(agentId: string): void;
   setLayout(mode: "tree" | "radial"): void;
